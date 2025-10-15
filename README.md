@@ -24,7 +24,37 @@ It combines aerospace physics, dynamic networking, and visual analytics into one
 - 🚨 **Threat Simulation** — Configurable *jammer* and *eavesdropper* entities  
 - 🧠 **Adaptive MAC Schemes** — TDMA (orthogonal), NOMA (non-orthogonal), and RSMA (rate-splitting)  
 - 🌍 **3D Orbit View** — Realistic LEO/MEO/GEO visual context with fully interactive Plotly visualization  
-- 🎛️ **Neon or B&W Themes** — Choose between futuristic “digital-green” or minimalist monochrome  
+- 🎛️ **Neon or B&W Themes** — Choose between futuristic “digital-green” or minimalist monochrome
+
+📊 Simulation Outputs
+	•	🗺️ Final UAV Positions — 2D neon plot showing node roles (S = Source, R = Relay, K = Sink)
+	•	🔗 Network Graph — Dynamic link edges proportional to throughput capacity
+	•	🛰️ Orbit Visualization — LEO/MEO/GEO orbit rings contextualizing aerial topology
+	•	📈 Metrics Table — Live throughput (Mbps), eavesdrop risk (0–1), and remaining battery (Wh)
+
+⸻
+
+🧮 Aerospace Accuracy Highlights
+	•	FSPL channel loss formula: 32.44 + 20 log₁₀(f_MHz) + 20 log₁₀(d_km)
+	•	Boltzmann constant for thermal noise: k = 1.380 × 10⁻²³ J/K
+	•	Dynamic propulsion: P_total = P_base + C · v³
+	•	MAC fairness: TDMA → 1/N, RSMA → 0.8, NOMA → 1.0
+
+⸻
+
+📘 Reference
+
+Sarkar, A., & Gul, M. (2023).
+Artificial Intelligence-Based Autonomous UAV Networks: A Survey.
+Drones, 7 (5), 322. https://doi.org/10.3390/drones7050322
+
+⸻
+
+🧩 Ideal Use Cases
+	•	🔬 Researching swarm autonomy and AI routing
+	•	🎯 Evaluating jamming resilience and intercept risk
+	•	📡 Testing RF link stability under environmental stress
+	•	🧠 Exploring hybrid MAC strategies in contested airspace
 
 ---
 
