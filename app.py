@@ -1,41 +1,37 @@
-# ===============================================================
-# Autonomous UAV Networks Simulator (Neon Green Theme)
-# ---------------------------------------------------------------
-# • Autonomous UAV network sim with MAC/Routing, adversaries, energy
-# • 3D orbit visualization (LEO/MEO/GEO)
-# • CSV / JSON / PDF Mission Report exports
-# • Banner-matched neon-green on black UI
-# ===============================================================
+# ================================================================
+#  Autonomous UAV Networks Simulator (Aerospace-Accurate Edition)
+#  app.py
+# ================================================================
 
-import math
-import random
-from dataclasses import dataclass, field
-from typing import List, Tuple, Optional
-import io, json
-
+import math, random
 import numpy as np
 import pandas as pd
 import networkx as nx
-from scipy.spatial.distance import cdist
-
 import streamlit as st
+from dataclasses import dataclass, field
+from typing import List
 import plotly.graph_objects as go
+from scipy.spatial.distance import cdist
 from plotly.subplots import make_subplots
 
-# PDF for mission report
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from reportlab.lib.utils import ImageReader
+# ================================================================
+#  CONSTANTS & UTILITIES
+# ================================================================
+K_B = 1.380649e-23   # Boltzmann (J/K)
+T0_K = 290.0         # Standard temperature (K)
 
-# ---------------------------------------------------------------
-# THEME (matches banner)
-# ---------------------------------------------------------------
+def db_to_lin(x_db): return 10.0 ** (x_db / 10.0)
+def lin_to_db(x):   return 10.0 * math.log10(max(x, 1e-30))
+
+# ================================================================
+#  NEON GREEN THEME
+# ================================================================
 THEME = {
-    "bg": "#0a0f0a",           # near-black
-    "panel": "#0c1310",        # sidebar/panels
-    "grid": "#123a28",         # subtle grid lines
-    "txt": "#d8ffe9",          # light mint text
-    "neon": "#22ff88",         # primary neon
+    "bg": "#0a0f0a",
+    "panel": "#0c1310",
+    "grid": "#123a28",
+    "txt": "#d8ffe9",
+    "neon": "#22ff88",
     "neon_mid": "#17d473",
     "neon_deep": "#0fa25f",
     "link": "#1aff80",
@@ -44,18 +40,15 @@ THEME = {
 def inject_app_css():
     st.markdown(f"""
     <style>
-      .stApp {{ background: {THEME['bg']}; color: {THEME['txt']}; }}
-      [data-testid="stSidebar"] {{ background: {THEME['panel']}; color: {THEME['txt']}; }}
-      h1, h2, h3, h4, h5, h6 {{ color: {THEME['txt']} !important; }}
-      .stDownloadButton button, .stButton button {{
-        border: 1px solid {THEME['neon_mid']}; color: {THEME['txt']};
-        background: transparent;
+      .stApp {{ background:{THEME['bg']}; color:{THEME['txt']}; }}
+      [data-testid="stSidebar"] {{ background:{THEME['panel']}; color:{THEME['txt']}; }}
+      h1, h2, h3, h4, h5, h6 {{ color:{THEME['txt']} !important; }}
+      .stButton button, .stDownloadButton button {{
+        border:1px solid {THEME['neon_mid']}; background:transparent; color:{THEME['txt']};
       }}
-      .stDownloadButton button:hover, .stButton button:hover {{
-        box-shadow: 0 0 14px {THEME['neon']};
-        border-color: {THEME['neon']};
+      .stButton button:hover, .stDownloadButton button:hover {{
+        box-shadow:0 0 14px {THEME['neon']}; border-color:{THEME['neon']};
       }}
-      .stDataFrame div[data-testid="stTable"] {{ color: {THEME['txt']}; }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -66,106 +59,82 @@ def greenify(fig, title=None):
         plot_bgcolor=THEME["bg"],
         font=dict(color=THEME["txt"]),
         legend=dict(font=dict(color=THEME["txt"])),
-        margin=dict(l=10, r=10, t=40 if title else 10, b=10),
         colorway=[THEME["neon"], THEME["neon_mid"], THEME["neon_deep"]],
+        margin=dict(l=10, r=10, t=40 if title else 10, b=10)
     )
-    fig.update_xaxes(
-        showgrid=True, gridcolor=THEME["grid"],
-        zeroline=False, linecolor=THEME["grid"], ticks="", showline=True
-    )
-    fig.update_yaxes(
-        showgrid=True, gridcolor=THEME["grid"],
-        zeroline=False, linecolor=THEME["grid"], ticks="", showline=True
-    )
+    fig.update_xaxes(showgrid=True, gridcolor=THEME["grid"], linecolor=THEME["grid"])
+    fig.update_yaxes(showgrid=True, gridcolor=THEME["grid"], linecolor=THEME["grid"])
     return fig
 
-# ---------------------------------------------------------------
-# Data Models
-# ---------------------------------------------------------------
+# ================================================================
+#  AEROSPACE MODELS
+# ================================================================
 @dataclass
 class UAV:
     uid: int
-    role: str
     pos: np.ndarray
-    v_max: float = 12.0
-    battery_Wh: float = 150.0
-    payload_kg: float = 0.5
-    tx_power_W: float = 1.0
-    rx_noise_W: float = 1e-9
+    role: str
     energy_used_Wh: float = 0.0
-    risk_aversion: float = 0.4
-    energy_aversion: float = 0.4
-    throughput_preference: float = 0.3
-
-    def move_toward(self, target: np.ndarray, dt: float, keep_in_bounds: Tuple[float, float] = (1000, 1000)):
-        vec = target - self.pos
-        dist = np.linalg.norm(vec)
-        if dist < 1e-6:
-            return
-        step = min(self.v_max * dt, dist)
-        self.pos = self.pos + (vec / dist) * step
-        self.pos[0] = np.clip(self.pos[0], 0, keep_in_bounds[0])
-        self.pos[1] = np.clip(self.pos[1], 0, keep_in_bounds[1])
+    battery_Wh: float = 150.0
+    def move(self, delta: np.ndarray): self.pos += delta
 
 @dataclass
-class Adversary:
-    kind: str
+class Jammer:
     pos: np.ndarray
-    power_W: float = 2.0
-    radius_m: float = 250.0
+    power_W: float = 5.0
+    kind: str = "jammer"
 
+@dataclass
+class Eavesdropper:
+    pos: np.ndarray
+    radius_m: float = 300.0
+    kind: str = "eaves"
+
+# ---- Channel Model (FSPL + Shadowing) ----
 @dataclass
 class ChannelModel:
     f_GHz: float = 2.4
-    pl0_dB: float = 40.0
-    d0_m: float = 1.0
-    n: float = 2.2
     shadowing_std_dB: float = 2.0
+    n_extra: float = 0.0
     rng: random.Random = field(default_factory=random.Random)
 
-    def pathloss_linear(self, d_m: float, shadow: bool = True):
-        if d_m < 1e-3:
-            d_m = 1e-3
-        pl_dB = self.pl0_dB + 10 * self.n * math.log10(d_m / self.d0_m)
+    def pathloss_dB(self, d_m: float, shadow=True):
+        d_km = max(d_m, 1e-3) / 1000.0
+        f_MHz = self.f_GHz * 1e3
+        fspl = 32.44 + 20.0 * math.log10(f_MHz) + 20.0 * math.log10(d_km)
+        extra = 10.0 * self.n_extra * math.log10(max(d_m, 1e-3))
+        pl = fspl + extra
         if shadow:
-            pl_dB += self.rng.gauss(0.0, self.shadowing_std_dB)
-        return 10.0 ** (-pl_dB / 10.0)
+            pl += self.rng.gauss(0.0, self.shadowing_std_dB)
+        return pl
 
-# ---------------------------------------------------------------
-# Utility
-# ---------------------------------------------------------------
-def capacity_bps(tx_power_W: float, gain_linear: float, noise_W: float, mac_share: float = 1.0):
-    sinr = (tx_power_W * gain_linear) / max(noise_W, 1e-15)
-    return mac_share * math.log2(1.0 + sinr)
+    def pathgain_linear(self, d_m: float, shadow=True):
+        return 10.0 ** (-self.pathloss_dB(d_m, shadow) / 10.0)
 
-def comm_energy_Wh(tx_power_W: float, seconds: float):
-    return (tx_power_W * seconds) / 3600.0
+# ---- Capacity ----
+def capacity_bps(EIRP_W: float, G_r_lin: float, path_gain: float,
+                 B_Hz: float, NF_dB: float):
+    N_W = K_B * T0_K * B_Hz * db_to_lin(NF_dB)
+    rx_W = EIRP_W * path_gain * G_r_lin
+    sinr = rx_W / max(N_W, 1e-30)
+    return B_Hz * math.log2(1.0 + sinr)
 
-def motion_energy_Wh(distance_m: float, mass_factor: float = 0.25):
-    return distance_m * mass_factor / 1000.0
+def mac_share(N: int, scheme: str):
+    if "TDMA" in scheme: return 1.0 / max(N, 1)
+    if "NOMA" in scheme: return 1.0
+    if "RSMA" in scheme: return 0.8
+    return 1.0 / max(N, 1)
 
-def mac_share(num_links: int, scheme: str):
-    if num_links <= 0:
-        return 0.0
-    s = scheme.lower()
-    if "tdma" in s:
-        return 1.0 / num_links
-    if "noma" in s:
-        return min(1.0, 0.65 + 0.5 / num_links)
-    if "rsma" in s:
-        return min(1.0, 0.75 + 0.6 / num_links)
-    return 1.0 / num_links
+# ---- Propulsion Power ----
+def propulsion_energy_Wh(speed_mps: float, dt_s: float, P_base_W: float, P_speed_coeff: float):
+    P = max(P_base_W + P_speed_coeff * (speed_mps ** 3), 0.0)
+    return P * dt_s / 3600.0
 
-def eaves_risk(midpoint: np.ndarray, eaves: Optional[Adversary]):
-    if not eaves:
-        return 0.0
-    d = np.linalg.norm(midpoint - eaves.pos)
-    return float(np.clip(1.0 - d / eaves.radius_m, 0.0, 1.0))
-
-# ---------------------------------------------------------------
-# Graph + Routing
-# ---------------------------------------------------------------
-def build_graph(uavs, ch, jammer, noise_W, link_thresh_bps, mac_scheme):
+# ================================================================
+#  GRAPH BUILDING
+# ================================================================
+def build_graph(uavs, ch, jammer, B_Hz, NF_dB, link_thresh_bps, mac_scheme,
+                tx_power_W, tx_gain_dBi, rx_gain_dBi):
     G = nx.DiGraph()
     for u in uavs:
         G.add_node(u.uid, pos=(u.pos[0], u.pos[1]), role=u.role)
@@ -174,404 +143,198 @@ def build_graph(uavs, ch, jammer, noise_W, link_thresh_bps, mac_scheme):
     dists = cdist(positions, positions)
     N = len(uavs)
 
+    EIRP_W = tx_power_W * db_to_lin(tx_gain_dBi)
+    G_r_lin = db_to_lin(rx_gain_dBi)
+
     for i in range(N):
         for j in range(N):
-            if i == j:
-                continue
-            g = ch.pathloss_linear(dists[i, j])
-            extra_noise = 0.0
-            if jammer and jammer.kind == "jammer":
-                if np.linalg.norm(uavs[i].pos - jammer.pos) <= jammer.radius_m or np.linalg.norm(uavs[j].pos - jammer.pos) <= jammer.radius_m:
-                    extra_noise += jammer.power_W * ch.pathloss_linear(np.linalg.norm(uavs[j].pos - jammer.pos), shadow=False)
+            if i == j: continue
+            pg = ch.pathgain_linear(dists[i, j])
+            N_W = K_B * T0_K * B_Hz * db_to_lin(NF_dB)
+            if jammer:
+                dJ = np.linalg.norm(uavs[j].pos - jammer.pos)
+                J_pg = ch.pathgain_linear(dJ, shadow=False)
+                N_W += jammer.power_W * J_pg
             mac = mac_share(N - 1, mac_scheme)
-            cap = capacity_bps(uavs[i].tx_power_W, g, noise_W + extra_noise, mac)
+            cap = mac * capacity_bps(EIRP_W, G_r_lin, pg, B_Hz, NF_dB)
             if cap >= link_thresh_bps:
                 G.add_edge(uavs[i].uid, uavs[j].uid, capacity_bps=cap)
     return G
 
-def route(G, src, dst):
-    for u, v, d in G.edges(data=True):
-        d["w"] = 1.0 / max(d["capacity_bps"], 1e-9)
-    try:
-        return nx.shortest_path(G, src, dst, weight="w")
-    except Exception:
-        return None
+# ================================================================
+#  3D ORBIT VIEW
+# ================================================================
+def _sphere_mesh(r):
+    u, v = np.mgrid[0:2 * np.pi:40j, 0:np.pi:20j]
+    x = r * np.cos(u) * np.sin(v)
+    y = r * np.sin(u) * np.sin(v)
+    z = r * np.cos(v)
+    return x, y, z
 
-# ---------------------------------------------------------------
-# Simulation Core
-# ---------------------------------------------------------------
-def pick_waypoint(uav, targets, jammer, eaves, bounds=(1000, 1000)):
-    goal = targets.get(uav.role, np.array([bounds[0] / 2, bounds[1] / 2]))
-    candidate = goal.copy()
+def _orbit_ring_xyz(r, tilt_deg=0):
+    th = np.linspace(0, 2 * np.pi, 200)
+    x = r * np.cos(th)
+    y = r * np.sin(th)
+    z = r * np.sin(np.radians(tilt_deg)) * np.ones_like(th)
+    return x, y, z
 
-    def nudge_away(p, adv, strength=120.0):
-        if not adv:
-            return p
-        d = np.linalg.norm(p - adv.pos)
-        if d < adv.radius_m:
-            vec = p - adv.pos
-            if np.linalg.norm(vec) < 1e-6:
-                vec = np.array([1.0, 0.0])
-            return p + (vec / np.linalg.norm(vec)) * strength
-        return p
-
-    candidate = nudge_away(candidate, jammer)
-    candidate = nudge_away(candidate, eaves)
-    center = np.array([bounds[0] / 2, bounds[1] / 2])
-    candidate += (center - uav.pos) * (0.1 * uav.energy_aversion)
-    return np.clip(candidate, [0, 0], list(bounds))
-
-def run_sim(seed, num_uav, area_xy, steps, dt, src_count, sink_count, mac_scheme,
-            link_thresh_bps, jammer_cfg, eaves_cfg, ch_params):
-    rng = np.random.RandomState(seed)
-    random.seed(seed)
-
-    roles = ["source"] * src_count + ["sink"] * sink_count
-    roles += ["relay"] * (num_uav - len(roles))
-    rng.shuffle(roles)
-
-    uavs = [UAV(uid=i, role=roles[i], pos=rng.rand(2) * np.array(area_xy)) for i in range(num_uav)]
-
-    jammer = Adversary("jammer", np.array(jammer_cfg["pos"]), jammer_cfg["power_W"], jammer_cfg["radius_m"]) if jammer_cfg.get("enabled") else None
-    eaves = Adversary("eaves", np.array(eaves_cfg["pos"]), 0, eaves_cfg["radius_m"]) if eaves_cfg.get("enabled") else None
-    ch = ChannelModel(**ch_params, rng=random.Random(seed))
-
-    targets = {
-        "source": np.array([0.15 * area_xy[0], 0.85 * area_xy[1]]),
-        "sink": np.array([0.85 * area_xy[0], 0.15 * area_xy[1]]),
-        "relay": np.array([0.5 * area_xy[0], 0.5 * area_xy[1]]),
-    }
-
-    metrics = []
-    for t in range(steps):
-        G = build_graph(uavs, ch, jammer, 1e-9, link_thresh_bps, mac_scheme)
-        sources = [u.uid for u in uavs if u.role == "source"]
-        sinks = [u.uid for u in uavs if u.role == "sink"]
-
-        total_thr, total_risk, total_Ecomm, links = 0.0, 0.0, 0.0, 0
-        for s in sources:
-            if not sinks:
-                continue
-            d = random.choice(sinks)
-            p = route(G, s, d)
-            if not p or len(p) < 2:
-                continue
-            caps, risks = [], []
-            for i in range(len(p) - 1):
-                u, v = p[i], p[i + 1]
-                cap = G.edges[u, v]["capacity_bps"]
-                u_pos = [U for U in uavs if U.uid == u][0].pos
-                v_pos = [U for U in uavs if U.uid == v][0].pos
-                risks.append(eaves_risk(0.5 * (u_pos + v_pos), eaves))
-                caps.append(cap)
-            total_thr += min(caps) if caps else 0.0
-            total_risk += np.mean(risks) if risks else 0.0
-            links += len(caps)
-            for i in range(len(p) - 1):
-                node = [U for U in uavs if U.uid == p[i]][0]
-                node.energy_used_Wh += comm_energy_Wh(node.tx_power_W, dt)
-                total_Ecomm += comm_energy_Wh(node.tx_power_W, dt)
-
-        total_risk /= max(len(sources), 1)
-        for u in uavs:
-            wp = pick_waypoint(u, targets, jammer, eaves, area_xy)
-            pre = u.pos.copy()
-            u.move_toward(wp, dt, keep_in_bounds=area_xy)
-            dist = np.linalg.norm(u.pos - pre)
-            u.energy_used_Wh += motion_energy_Wh(dist)
-
-        avgBatt = np.mean([max(u.battery_Wh - u.energy_used_Wh, 0.0) for u in uavs])
-        metrics.append(dict(t=t, throughput_bps=total_thr, avg_eaves_risk_0to1=total_risk,
-                            used_links=links, avg_remaining_battery_Wh=avgBatt,
-                            total_comm_energy_Wh=total_Ecomm))
-    return uavs, pd.DataFrame(metrics), area_xy, jammer, eaves, ch
-
-# ---------------------------------------------------------------
-# 3D Orbit Visualization
-# ---------------------------------------------------------------
-def _orbit_ring_xyz(R, tilt=0, n=360):
-    t = np.linspace(0, 2 * np.pi, n)
-    x, y, z = R * np.cos(t), R * np.sin(t), np.zeros_like(t)
-    tilt = np.deg2rad(tilt)
-    Ry = y * np.cos(tilt) - z * np.sin(tilt)
-    Rz = y * np.sin(tilt) + z * np.cos(tilt)
-    return x, Ry, Rz
-
-def _sphere_mesh(R=400, nu=64, nv=32):
-    u, v = np.meshgrid(np.linspace(0, 2 * np.pi, nu), np.linspace(0, np.pi, nv))
-    return R * np.cos(u) * np.sin(v), R * np.sin(u) * np.sin(v), R * np.cos(v)
-
-def make_orbit_figure(uavs, area_xy, Rp=400, LEO=520, MEO=700, GEO=880, tilt=0, alpha=0.18):
+def make_orbit_figure(uavs, area_xy, Rp=400, LEO=520, MEO=700, GEO=880,
+                      tilt=0, alpha=0.18):
     xs, ys, zs = _sphere_mesh(Rp)
     fig = go.Figure()
 
-    # Planet
     fig.add_surface(
-        x=xs, y=ys, z=zs,
-        opacity=alpha, showscale=False,
-        colorscale=[[0, "rgb(5,40,25)"], [1, "rgb(10,70,45)"]]
+        x=xs, y=ys, z=zs, opacity=alpha,
+        colorscale=[[0, "rgb(5,40,25)"], [1, "rgb(10,70,45)"]],
+        showscale=False
     )
 
-    # Orbit rings
-    for r, name in [(LEO, "LEO Orbit"), (MEO, "MEO Orbit"), (GEO, "GEO Orbit")]:
+    for r, name in [(LEO, "LEO"), (MEO, "MEO"), (GEO, "GEO")]:
         rx, ry, rz = _orbit_ring_xyz(r, tilt)
         fig.add_trace(go.Scatter3d(
             x=rx, y=ry, z=rz, mode="lines",
             line=dict(width=3, color=THEME["neon"]),
-            name=name
+            name=f"{name} Orbit"
         ))
 
-    # UAVs
-    scale = 0.7 * Rp
     ax, ay = area_xy
+    scale = 0.7 * Rp
     px = [(u.pos[0] / ax - 0.5) * 2 * scale for u in uavs]
     py = [(u.pos[1] / ay - 0.5) * 2 * scale for u in uavs]
     pz = [0] * len(uavs)
     roles = [u.role for u in uavs]
     col_map = {"source": THEME["neon"], "relay": THEME["neon_mid"], "sink": THEME["neon_deep"]}
     cols = [col_map.get(r, THEME["neon_mid"]) for r in roles]
+
     fig.add_trace(go.Scatter3d(
         x=px, y=py, z=pz, mode="markers+text",
         marker=dict(size=6, color=cols),
         text=[f"UAV {u.uid}" for u in uavs],
         textfont=dict(color=THEME["txt"]),
-        textposition="top center",
-        name="UAVs"
+        textposition="top center"
     ))
-
-    fig.update_scenes(
-        xaxis_visible=False, yaxis_visible=False, zaxis_visible=False,
-        bgcolor=THEME["bg"]
-    )
-    fig.update_layout(
-        paper_bgcolor=THEME["bg"],
-        margin=dict(l=0, r=0, t=0, b=0),
-        legend=dict(font=dict(color=THEME["txt"]))
-    )
+    fig.update_scenes(xaxis_visible=False, yaxis_visible=False, zaxis_visible=False, bgcolor=THEME["bg"])
+    fig.update_layout(paper_bgcolor=THEME["bg"], margin=dict(l=0, r=0, t=0, b=0))
     return fig
 
-# ---------------------------------------------------------------
-# Export helpers
-# ---------------------------------------------------------------
-def export_data(metrics_df, uavs, params):
-    csv_buf = io.StringIO()
-    metrics_df.to_csv(csv_buf, index=False)
-    csv_bytes = csv_buf.getvalue().encode("utf-8")
-    u_summary = [{"uid": u.uid, "role": u.role, "x_m": float(u.pos[0]), "y_m": float(u.pos[1]),
-                  "energy_used_Wh": u.energy_used_Wh,
-                  "battery_remaining_Wh": max(u.battery_Wh - u.energy_used_Wh, 0)} for u in uavs]
-    json_bytes = json.dumps({"parameters": params, "metrics": metrics_df.to_dict(orient="records"),
-                             "uavs": u_summary}, indent=2).encode("utf-8")
-    return csv_bytes, json_bytes
-
-def summarize_metrics(df):
-    if df.empty:
-        return {}
-    return {"steps": int(df["t"].max()) + 1,
-            "avg_thr": float(df["throughput_bps"].mean() / 1e6),
-            "peak_thr": float(df["throughput_bps"].max() / 1e6),
-            "final_batt": float(df["avg_remaining_battery_Wh"].iloc[-1]),
-            "avg_risk": float(df["avg_eaves_risk_0to1"].mean())}
-
-def build_pdf_report(params, df, imgs):
-    buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=letter)
-    W, H = letter
-    y = H - 0.8 * 72
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(0.8 * 72, y, "Autonomous UAV Networks – Mission Report")
-    y -= 0.3 * 72
-    c.setFont("Helvetica", 10)
-    c.drawString(0.8 * 72, y, "Autonomy • Routing • Energy • Security • Orbit Visualization")
-    y -= 0.35 * 72
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(0.8 * 72, y, "Parameters")
-    y -= 0.2 * 72
-    c.setFont("Helvetica", 10)
-    for k, v in params.items():
-        c.drawString(0.9 * 72, y, f"• {k}: {v}"); y -= 0.15 * 72
-    s = summarize_metrics(df)
-    if s:
-        y -= 0.1 * 72
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(0.8 * 72, y, "Quick Stats"); y -= 0.18 * 72
-        c.setFont("Helvetica", 10)
-        for k, v in s.items():
-            c.drawString(0.9 * 72, y, f"• {k}: {v:.3f}" if isinstance(v, float) else f"• {k}: {v}")
-            y -= 0.15 * 72
-    if imgs.get("map"):    c.drawImage(ImageReader(io.BytesIO(imgs["map"])),    0.7 * 72, 3.8 * 72, 3.5 * 72, 3 * 72)
-    if imgs.get("links"):  c.drawImage(ImageReader(io.BytesIO(imgs["links"])),  4.5 * 72, 3.8 * 72, 3.0 * 72, 3 * 72)
-    c.showPage()
-    if imgs.get("metrics"): c.drawImage(ImageReader(io.BytesIO(imgs["metrics"])), 0.8 * 72, 3.0 * 72, 7.0 * 72, 4.0 * 72)
-    if imgs.get("orbits"):  c.drawImage(ImageReader(io.BytesIO(imgs["orbits"])),  1.0 * 72, 0.8 * 72, 6.0 * 72, 2.0 * 72)
-    c.save()
-    return buf.getvalue()
-
-# ---------------------------------------------------------------
-# Streamlit UI
-# ---------------------------------------------------------------
-st.set_page_config(page_title="Autonomous UAV Networks Simulator", layout="wide")
+# ================================================================
+#  STREAMLIT FRONT-END
+# ================================================================
+st.set_page_config("Autonomous UAV Networks Simulator", layout="wide")
 inject_app_css()
 st.title("🛰️ Autonomous UAV Networks Simulator")
-st.caption("Based on Sarkar & Gul (2023) — Artificial Intelligence-Based Autonomous UAV Networks: A Survey")
+st.caption("High-Fidelity Aerospace Network Model — based on Sarkar & Gul (2023)")
 
-with st.sidebar:
-    st.header("Scenario")
-    seed = st.number_input("Seed", 0, 999999, 42)
-    area_x = st.slider("Area X (m)", 300, 2000, 1000, 50)
-    area_y = st.slider("Area Y (m)", 300, 2000, 1000, 50)
-    num = st.slider("UAVs", 3, 40, 12)
-    srcs = st.slider("Sources", 1, 10, 3)
-    sinks = st.slider("Sinks", 1, 10, 3)
-    steps = st.slider("Steps", 5, 300, 120, 5)
-    dt = st.slider("Δt (s)", 0.5, 5.0, 1.0, 0.5)
+# ---- Sidebar Inputs ----
+st.sidebar.header("Scenario Setup")
+num_uavs = st.sidebar.slider("Number of UAVs", 6, 20, 12)
+sources = st.sidebar.slider("Sources", 1, 5, 3)
+sinks = st.sidebar.slider("Sinks", 1, 5, 3)
+steps = st.sidebar.slider("Simulation Steps", 10, 200, 120, 10)
+dt = st.sidebar.number_input("Timestep (s)", 0.1, 5.0, 1.0)
+area_xy = np.array([
+    st.sidebar.slider("Area X (m)", 500, 3000, 1000, 100),
+    st.sidebar.slider("Area Y (m)", 500, 3000, 2000, 100)
+])
 
-    st.header("Comm / MAC")
-    mac = st.selectbox("MAC Scheme", ["TDMA (Orthogonal)", "NOMA (Superposition)", "Rate-Splitting (RSMA)"])
-    link_thresh = st.slider("Link Capacity Threshold (bps)", 0.1, 10.0, 1.0, 0.1)
+st.sidebar.header("Radio / RF")
+bandwidth_MHz = st.sidebar.slider("Channel bandwidth (MHz)", 1.0, 20.0, 5.0, 0.5)
+noise_fig_dB = st.sidebar.slider("Receiver noise figure (dB)", 2.0, 10.0, 6.0, 0.5)
+tx_power_W = st.sidebar.slider("TX power (W)", 0.1, 10.0, 2.0, 0.1)
+tx_gain_dBi = st.sidebar.slider("TX antenna gain (dBi)", 0.0, 15.0, 5.0, 0.5)
+rx_gain_dBi = st.sidebar.slider("RX antenna gain (dBi)", 0.0, 15.0, 5.0, 0.5)
+B_Hz = bandwidth_MHz * 1e6
 
-    st.header("Channel")
-    f = st.slider("Carrier f (GHz)", 0.9, 6.0, 2.4, 0.1)
-    pl0 = st.slider("PL(d0) dB @1m", 30, 60, 40, 1)
-    n = st.slider("Pathloss exponent n", 1.6, 3.5, 2.2, 0.1)
-    sh = st.slider("Shadowing σ (dB)", 0.0, 6.0, 2.0, 0.5)
+st.sidebar.header("Channel & Link")
+f_GHz = st.sidebar.slider("Frequency (GHz)", 1.0, 10.0, 4.0, 0.1)
+pathloss_extra = st.sidebar.slider("Extra exponent (air clutter)", 0.0, 1.0, 0.2, 0.1)
+shadowing_std = st.sidebar.slider("Shadowing σ (dB)", 0.0, 6.0, 2.0, 0.5)
+link_thresh = st.sidebar.slider("Min link capacity (bps)", 1e4, 5e7, 1e6, step=1e4)
+mac = st.sidebar.selectbox("MAC scheme", ["TDMA (Orthogonal)", "NOMA (Non-Orthogonal)", "RSMA (Rate-Splitting)"])
+jammer_enabled = st.sidebar.checkbox("Enable jammer", True)
+eaves_enabled = st.sidebar.checkbox("Enable eavesdropper", True)
 
-    st.header("Adversaries")
-    jam_on = st.checkbox("Enable Jammer", True)
-    jam_x = st.slider("Jammer X", 0, area_x, int(0.35 * area_x), 10)
-    jam_y = st.slider("Jammer Y", 0, area_y, int(0.65 * area_y), 10)
-    jam_pow = st.slider("Jammer Power (W)", 0.1, 10.0, 2.0, 0.1)
-    jam_r = st.slider("Jammer Radius (m)", 50, 600, 250, 10)
-    eav_on = st.checkbox("Enable Eavesdropper", True)
-    eav_x = st.slider("Eaves X", 0, area_x, int(0.65 * area_x), 10)
-    eav_y = st.slider("Eaves Y", 0, area_y, int(0.35 * area_y), 10)
-    eav_r = st.slider("Eaves Radius (m)", 50, 600, 250, 10)
+st.sidebar.header("Propulsion")
+P_base_W = st.sidebar.slider("Propulsion power @ cruise (W)", 40, 200, 90, 5)
+P_speed_coeff = st.sidebar.slider("Speed power coeff (W/(m/s)^3)", 0.0, 0.2, 0.02, 0.01)
 
-    st.header("3D Orbit View")
-    show_3d = st.checkbox("Enable 3D Orbit Scene", True)
-    orbit_tilt = st.slider("Ring Tilt (deg)", -40, 40, 0, 1)
-    planet_R = st.slider("Planet Radius (vis)", 200, 800, 400, 20)
-    leo_r = st.slider("LEO Radius", 320, 900, 520, 10)
-    meo_r = st.slider("MEO Radius", 500, 1200, 700, 10)
-    geo_r = st.slider("GEO Radius", 700, 1600, 880, 10)
-    sphere_alpha = st.slider("Sphere Opacity", 0.0, 1.0, 0.20, 0.05)
+show_3d = st.sidebar.checkbox("Show 3D orbit", True)
 
-    run = st.button("Run Simulation", type="primary")
+# ================================================================
+#  SIMULATION
+# ================================================================
+roles = ["source"] * sources + ["sink"] * sinks + ["relay"] * (num_uavs - sources - sinks)
+uavs = [UAV(i, np.random.rand(2) * area_xy, roles[i]) for i in range(num_uavs)]
 
-# =========================================================
-# Run Simulation and Display Results
-# =========================================================
-if run:
-    jammer_cfg = dict(enabled=jam_on, pos=[jam_x, jam_y], power_W=jam_pow, radius_m=jam_r)
-    eaves_cfg = dict(enabled=eav_on, pos=[eav_x, eav_y], radius_m=eav_r)
-    ch_params = dict(f_GHz=f, pl0_dB=pl0, n=n, shadowing_std_dB=sh)
+ch = ChannelModel(f_GHz=f_GHz, shadowing_std_dB=shadowing_std, n_extra=pathloss_extra)
+jammer = Jammer(np.random.rand(2) * area_xy) if jammer_enabled else None
+eaves = Eavesdropper(np.random.rand(2) * area_xy) if eaves_enabled else None
 
-    uavs, metrics, area_xy, jammer, eaves, ch = run_sim(
-        seed, num, (area_x, area_y), steps, dt, srcs, sinks,
-        mac, link_thresh, jammer_cfg, eaves_cfg, ch_params
-    )
+metrics = []
+for t in range(steps):
+    G = build_graph(uavs, ch, jammer, B_Hz, noise_fig_dB, link_thresh, mac,
+                    tx_power_W, tx_gain_dBi, rx_gain_dBi)
 
-    # ---- Final positions (neon)
-    roles = [u.role for u in uavs]
-    role_color = {"source": THEME["neon"], "relay": THEME["neon_mid"], "sink": THEME["neon_deep"]}
-    colors = [role_color.get(r, THEME["neon_mid"]) for r in roles]
+    throughput = 0.0
+    route_risk = []
+    for s in [u.uid for u in uavs if u.role == "source"]:
+        for k in [u.uid for u in uavs if u.role == "sink"]:
+            try:
+                path = nx.shortest_path(G, source=s, target=k)
+                caps = [G.edges[path[i], path[i+1]]["capacity_bps"] for i in range(len(path)-1)]
+                throughput += min(caps)
+                if eaves:
+                    dist = np.mean([np.linalg.norm(uavs[n].pos - eaves.pos) for n in path])
+                    route_risk.append(float(np.clip(1.0 - dist / eaves.radius_m, 0.0, 1.0)))
+            except nx.NetworkXNoPath:
+                continue
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=[u.pos[0] for u in uavs], y=[u.pos[1] for u in uavs],
-        mode="markers+text",
-        marker=dict(size=12, color=colors, line=dict(width=1, color=THEME["grid"])),
-        text=[f"{u.uid}:{u.role[0].upper()}" for u in uavs],
-        textposition="top center",
-        name="UAVs"
-    ))
-    # Adversary zones
-    def add_circle(center, radius, name):
-        th = np.linspace(0, 2*np.pi, 200)
-        cx = center[0] + radius*np.cos(th)
-        cy = center[1] + radius*np.sin(th)
-        fig.add_trace(go.Scatter(x=cx, y=cy, mode="lines",
-                                 line=dict(color=THEME["neon_mid"], dash="dot"),
-                                 name=name))
-        fig.add_trace(go.Scatter(x=[center[0]], y=[center[1]], mode="markers",
-                                 marker=dict(symbol="x", size=10, color=THEME["neon"]),
-                                 name=f"{name} center"))
-    if jammer: add_circle(jammer.pos, jammer.radius_m, "Jammer Zone")
-    if eaves:  add_circle(eaves.pos, eaves.radius_m, "Eaves Zone")
+    total_risk = float(np.mean(route_risk)) if route_risk else 0.0
+    if not route_risk and eaves:
+        d = [np.linalg.norm(u.pos - eaves.pos) for u in uavs]
+        prox = [float(np.clip(1.0 - di / eaves.radius_m, 0.0, 1.0)) for di in d]
+        total_risk = float(np.mean(prox))
 
-    fig.update_layout(xaxis_range=[0, area_xy[0]], yaxis_range=[0, area_xy[1]])
-    fig = greenify(fig, "Final UAV Positions")
-    st.plotly_chart(fig, use_container_width=True)
+    # Update energy
+    for u in uavs:
+        pre = u.pos.copy()
+        u.move((np.random.rand(2)-0.5)*10)
+        dist = np.linalg.norm(u.pos - pre)
+        speed = dist / max(dt, 1e-9)
+        u.energy_used_Wh += propulsion_energy_Wh(speed, dt, P_base_W, P_speed_coeff)
+        u.battery_Wh = max(0.0, 150.0 - u.energy_used_Wh)
 
-    # ---- Connectivity
-    G = build_graph(uavs, ch, jammer, 1e-9, link_thresh, mac)
-    edge_x, edge_y = [], []
-    for u, v in G.edges():
-        up = [U for U in uavs if U.uid == u][0].pos
-        vp = [U for U in uavs if U.uid == v][0].pos
-        edge_x += [up[0], vp[0], None]
-        edge_y += [up[1], vp[1], None]
-    fig2 = go.Figure()
-    fig2.add_trace(go.Scatter(x=edge_x, y=edge_y, mode="lines",
-                              line=dict(color=THEME["link"], width=2), opacity=0.45, name="Links"))
-    fig2.add_trace(go.Scatter(x=[u.pos[0] for u in uavs], y=[u.pos[1] for u in uavs],
-                              mode="markers", marker=dict(size=9, color=colors,
-                              line=dict(width=1, color=THEME["grid"])), name="UAVs"))
-    fig2.update_layout(xaxis_range=[0, area_xy[0]], yaxis_range=[0, area_xy[1]])
-    fig2 = greenify(fig2, "Connectivity Graph")
-    st.plotly_chart(fig2, use_container_width=True)
+    metrics.append({
+        "t": t,
+        "throughput_bps": throughput,
+        "throughput_Mbps": throughput / 1e6,
+        "avg_eaves_risk_0to1": total_risk,
+        "avg_remaining_battery_Wh": np.mean([u.battery_Wh for u in uavs]),
+    })
 
-    # ---- 3D Orbit
-    if show_3d:
-        fig3d = make_orbit_figure(
-            uavs=uavs, area_xy=area_xy,
-            Rp=planet_R, LEO=leo_r, MEO=meo_r, GEO=geo_r,
-            tilt=orbit_tilt, alpha=sphere_alpha
-        )
-        st.plotly_chart(fig3d, use_container_width=True)
+df = pd.DataFrame(metrics)
 
-    # ---- Metrics
-    metrics["throughput_Mbps"] = metrics["throughput_bps"] / 1e6
-    figm = make_subplots(rows=3, cols=1, shared_xaxes=True,
-                         subplot_titles=("Throughput (Mb/s)", "Avg Battery (Wh)", "Eaves Risk (0–1)"))
-    figm.add_trace(go.Scatter(x=metrics["t"], y=metrics["throughput_Mbps"], mode="lines",
-                              line=dict(width=2, color=THEME["neon"])), 1, 1)
-    figm.add_trace(go.Scatter(x=metrics["t"], y=metrics["avg_remaining_battery_Wh"], mode="lines",
-                              line=dict(width=2, color=THEME["neon_mid"])), 2, 1)
-    figm.add_trace(go.Scatter(x=metrics["t"], y=metrics["avg_eaves_risk_0to1"], mode="lines",
-                              line=dict(width=2, color=THEME["neon_deep"])), 3, 1)
-    figm = greenify(figm, "Analytics")
-    st.plotly_chart(figm, use_container_width=True)
+# ================================================================
+#  VISUALIZATION
+# ================================================================
+role_color = {"source": THEME["neon"], "relay": THEME["neon_mid"], "sink": THEME["neon_deep"]}
+colors = [role_color.get(u.role, THEME["neon_mid"]) for u in uavs]
 
-    # ---- Export Section
-    st.subheader("Export Results")
-    params_dict = {
-        "num_uavs": num, "sources": srcs, "sinks": sinks,
-        "steps": steps, "dt": dt, "MAC_scheme": mac,
-        "jammer_enabled": jam_on, "eavesdropper_enabled": eav_on,
-        "area_m": (area_x, area_y), "pathloss_exponent": n,
-        "shadowing_std_dB": sh, "frequency_GHz": f
-    }
-    csv_bytes, json_bytes = export_data(metrics, uavs, params_dict)
-    st.download_button("📄 Download CSV", csv_bytes, "uav_metrics.csv", "text/csv")
-    st.download_button("🧠 Download JSON", json_bytes, "uav_full_export.json", "application/json")
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=[u.pos[0] for u in uavs], y=[u.pos[1] for u in uavs],
+    mode="markers+text",
+    marker=dict(size=12, color=colors, line=dict(width=1, color=THEME["grid"])),
+    text=[f"{u.uid}:{u.role[0].upper()}" for u in uavs],
+    textposition="top center"))
+fig = greenify(fig, "Final UAV Positions")
+st.plotly_chart(fig, use_container_width=True)
 
-    # ---- PDF Report (requires kaleido installed for to_image())
-    try:
-        map_png = fig.to_image(format="png", scale=2)
-        links_png = fig2.to_image(format="png", scale=2)
-        metrics_png = figm.to_image(format="png", scale=2)
-        orbits_png = None
-        if show_3d:
-            orbits_png = fig3d.to_image(format="png", scale=2)
-        pdf_bytes = build_pdf_report(params_dict, metrics,
-                                     {"map": map_png, "links": links_png,
-                                      "metrics": metrics_png, "orbits": orbits_png})
-        st.download_button("🗂️ Download PDF Mission Report", pdf_bytes,
-                           "uav_mission_report.pdf", "application/pdf")
-    except Exception as e:
-        st.warning(f"PDF export unavailable: {e} (check kaleido install)")
-
-    st.success("✅ Simulation complete — tweak sliders and rerun!")
-else:
-    st.info("Set parameters in the sidebar and click **Run Simulation**.")
+edge_x, edge_y = [], []
+for u, v in G.edges():
+    up = [U for U in uavs if U.uid == u][0].pos
+    vp = [U for U in uavs if U.uid == v][0].pos
+    edge_x += [up[0], vp[0], None]
+    edge_y += [up[1], vp[1], None]
+fig2 = go.Figure()
+fig2.add_trace(go.Sc
