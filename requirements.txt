@@ -1,1 +1,11 @@
+# Core app
+streamlit==1.39.0
+plotly>=5.22
+numpy>=1.24
+pandas>=2.0
+scipy>=1.10
+networkx>=3.1
 
+# Exports (PDF + plot snapshots)
+reportlab>=3.6
+kaleido==0.2.1
