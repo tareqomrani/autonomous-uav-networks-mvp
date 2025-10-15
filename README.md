@@ -4,38 +4,40 @@
 
 
 ✈️**Autonomous Intelligence Networks for UAVs**  
-Interactive Streamlit simulation mapping the ideas from *Sarkar & Gul (2023)* —  
-“Artificial Intelligence-Based Autonomous UAV Networks: A Survey” (*Drones 7(5):322*).  
+# 🛰️ Autonomous UAV Networks Simulator (Aerospace-Accurate Edition)
 
-https://www.mdpi.com/2504-446X/7/5/322
-
-
----
-
-### 🎯 Overview
-This app transforms academic concepts on **AI-based UAV networks** into an interactive environment for studying:
-- autonomous waypointing and connectivity  
-- MAC and routing schemes (TDMA / NOMA / RSMA)  
-- energy vs throughput trade-offs  
-- jammer / eavesdropper security zones  
-- cinematic 3D orbit visualization (LEO / MEO / GEO rings)
-
-Built for rapid experimentation, analysis, and education on autonomous aerial mesh systems.
+> **High-Fidelity Simulation of Autonomous UAV Mesh Networks**  
+> Built for aerospace-grade research, education, and AI-driven network resilience modeling.  
+> Inspired by *Sarkar & Gul (2023), “Artificial Intelligence-Based Autonomous UAV Networks: A Survey.”*
 
 ---
 
-### ⚙️ Features
-- **Autonomy & Routing:** UAVs navigate and re-route dynamically to maintain network capacity.  
-- **Power & Energy:** Combines transmission + motion energy for each UAV over time.  
-- **Security Simulation:** Models jamming and eavesdropping risk fields.  
-- **Analytics Dashboard:** Live throughput, battery, and risk plots per step.  
-- **3D Orbit View:** Optional cinematic layer showing orbits and UAV placement.  
+## 🌐 Overview
+
+This Streamlit-based simulator models **autonomous UAV mesh networks** with full **RF propagation**, **energy**, and **threat environment** realism.  
+It combines aerospace physics, dynamic networking, and visual analytics into one interactive, browser-based lab.
+
+### ✳️ Key Features
+
+- 📡 **Physics-Accurate Channel Modeling** — Free-space pathloss (FSPL), MHz–km scaling, and Gaussian shadowing  
+- ⚙️ **Dynamic Graph Construction** — Source, relay, and sink topology updates per timestep  
+- 🔋 **Propulsion Energy Model** — Speed-dependent drag power (∝ v³) and per-UAV battery tracking  
+- 🚨 **Threat Simulation** — Configurable *jammer* and *eavesdropper* entities  
+- 🧠 **Adaptive MAC Schemes** — TDMA (orthogonal), NOMA (non-orthogonal), and RSMA (rate-splitting)  
+- 🌍 **3D Orbit View** — Realistic LEO/MEO/GEO visual context with fully interactive Plotly visualization  
+- 🎛️ **Neon or B&W Themes** — Choose between futuristic “digital-green” or minimalist monochrome  
 
 ---
 
-### 🚀 Quick Start
+## 🧭 Quick Start
+
 ```bash
-pip install streamlit plotly numpy pandas networkx scipy
+# Clone this repository
+git clone https://github.com/<your-username>/Autonomous-UAV-Networks-Simulator.git
+cd Autonomous-UAV-Networks-Simulator
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the simulator
 streamlit run app.py
-
-
