@@ -3,7 +3,6 @@
 </p>
 
 
-✈️**Autonomous Intelligence Networks for UAVs**  
 # 🛰️ Autonomous UAV Networks Simulator (Aerospace-Accurate Edition)
 
 > **High-Fidelity Simulation of Autonomous UAV Mesh Networks**  
