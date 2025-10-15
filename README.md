@@ -1,9 +1,9 @@
 <p align="center">
   <img src="banner3.PNG" alt="Autonomous UAV Networks Banner" width="100%">
 </p>
-MVP
 
-**Autonomous Intelligence Networks for UAVs**  
+
+✈️**Autonomous Intelligence Networks for UAVs**  
 Interactive Streamlit simulation mapping the ideas from *Sarkar & Gul (2023)* —  
 “Artificial Intelligence-Based Autonomous UAV Networks: A Survey” (*Drones 7(5):322*).  
 
