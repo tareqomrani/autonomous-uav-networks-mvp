@@ -1,3 +1,6 @@
+<p align="center">
+  <img src="banner3.png" alt="Autonomous UAV Networks Banner" width="100%">
+</p>
 🛰️ Autonomous UAV Networks Simulator
 Based on Artificial Intelligence-Based Autonomous UAV Networks: A Survey (Sarkar & Gul, 2023, Drones)
 https://www.mdpi.com/2504-446X/7/5/322
