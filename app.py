@@ -1,5 +1,5 @@
 # ================================================================
-#  Autonomous UAV Networks.
+#  Autonomous UAV Networks
 #  Digital-Green v2.3 – ISA + Aerodynamics + Two-Ray + Rician + LTE-MCS
 #  MAC presets + Eavesdropper risk + 3D Orbit + Animation
 #  Run Button + Reset & Reseed + Progress Bar + Expanded Exports
