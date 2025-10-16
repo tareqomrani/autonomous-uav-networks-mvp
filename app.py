@@ -259,7 +259,7 @@ def animation_figure(traj_df, area, U):
 def orbit_figure(U, area):
     Rp=400
     u,v=np.mgrid[0:2*PI:40j,0:PI:20j]
-    x=Rp*np.cos(u)*np.sin(v); y=Rp*np.sin(u)*np.sin(v); z=Rp*np.cos(v)
+    x=Rp*np.cos(u)*np.sin(v); y=Rp*np.sin(u)*np.cos(v); z=Rp*np.cos(v)
     fig=go.Figure(); fig.add_surface(x=x,y=y,z=z,opacity=0.12,showscale=False,
                                      colorscale=[[0,"rgb(5,40,25)"],[1,"rgb(10,70,45)"]])
     for r,name in [(520,"LEO"),(700,"MEO"),(880,"GEO")]:
@@ -281,9 +281,9 @@ def orbit_figure(U, area):
 # ================================================================
 #  STREAMLIT APP
 # ================================================================
-st.set_page_config("Autonomous UAV Networks.", layout="wide")
+st.set_page_config("Autonomous UAV Networks", layout="wide")
 inject_css()
-st.title("Autonomous UAV Networks.")
+st.title("Autonomous UAV Networks")
 
 # Session seed for deterministic runs (until reset)
 if "rng_seed" not in st.session_state:
