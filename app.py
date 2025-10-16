@@ -1,19 +1,33 @@
 # ================================================================
-#  Aerospace UAV Networks Simulator v2.3 – Digital-Green (Consolidated)
-#  ISA + Aerodynamics + Two-Ray + Rician + LTE-MCS + MAC presets + Eaves Risk
+#  Autonomous UAV Networks.
+#  Digital-Green v2.3 – ISA + Aerodynamics + Two-Ray + Rician + LTE-MCS
+#  MAC presets + Eavesdropper risk + 3D Orbit + Animation
+#  Run Button + Reset & Reseed + Progress Bar + Expanded Exports
 # ================================================================
-import math, random
-import numpy as np, pandas as pd, networkx as nx, streamlit as st
+import math, random, io, json, zipfile
+from datetime import datetime
+
+import numpy as np
+import pandas as pd
+import networkx as nx
+import streamlit as st
 import plotly.graph_objects as go
 from dataclasses import dataclass
 
 # ---------------- Constants & utils ----------------
-K_B=1.380649e-23; G0=9.80665; C=2.99792458e8; PI=math.pi; EPS0=8.854187817e-12
+K_B = 1.380649e-23
+G0  = 9.80665
+C   = 2.99792458e8
+PI  = math.pi
+EPS0= 8.854187817e-12
+
 def db_to_lin(x): return 10**(x/10)
 def lin_to_db(x): return 10*math.log10(max(x,1e-30))
 
-THEME={"bg":"#0a0f0a","panel":"#0c1310","grid":"#123a28","txt":"#d8ffe9",
-       "neon":"#22ff88","neon_mid":"#17d473","neon_deep":"#0fa25f"}
+THEME = {
+    "bg":"#0a0f0a","panel":"#0c1310","grid":"#123a28","txt":"#d8ffe9",
+    "neon":"#22ff88","neon_mid":"#17d473","neon_deep":"#0fa25f"
+}
 
 def inject_css():
     st.markdown(f"""
@@ -34,7 +48,8 @@ def greenify(fig, title=None):
         font=dict(color=THEME["txt"]),
         legend=dict(font=dict(color=THEME["txt"])),
         colorway=[THEME["neon"], THEME["neon_mid"], THEME["neon_deep"]],
-        margin=dict(l=10,r=10,t=40 if title else 10,b=10))
+        margin=dict(l=10, r=10, t=40 if title else 10, b=10)
+    )
     fig.update_xaxes(showgrid=True, gridcolor=THEME["grid"], linecolor=THEME["grid"])
     fig.update_yaxes(showgrid=True, gridcolor=THEME["grid"], linecolor=THEME["grid"])
     return fig
@@ -165,7 +180,6 @@ def build_graph(U, ch, txP, txG, rxG, jammer, use_mcs):
             if jammer is not None:
                 I=jammer["P"]*fspl_pg(ch["f"], np.linalg.norm(jammer["p"]-r.p3d()))
             sinr=rx_W/max(N+I,1e-30); sinr_dB=10*math.log10(max(sinr,1e-12))
-            # MAC preset (rough neighbor count)
             macK = mac_share(max(len(U)-1,1), ch.get("mac_scheme","TDMA (Orthogonal)"))
             if use_mcs: C=ch["B"]*mcs_eff(sinr_dB)*macK
             else:       C=ch["B"]*math.log2(1+sinr)*macK*0.8
@@ -192,25 +206,28 @@ def widest(G,res,s,t):
 def flow(G,S,T):
     res={(u,v):G[u][v]["cap"] for u,v in G.edges}; tot=0
     while True:
-        best=(None,None,0); best_path=None
+        best=(None,None,0)
         for s in S:
             for t in T:
                 p,c=widest(G,res,s,t)
-                if p and c>best[2]: best=((s,t),p,c); best_path=p
+                if p and c>best[2]: best=((s,t),p,c)
         if best[0] is None: break
         _,p,c=best; tot+=c
-        for i in range(len(p)-1): e=(p[i],p[i+1]); res[e]=max(0,res[e]-c)
+        for i in range(len(p)-1):
+            e=(p[i],p[i+1]); res[e]=max(0,res[e]-c)
     return tot,None
 
-# ---------------- Visuals ----------------
+# ---------------- Visual helpers ----------------
 def metrics_figure(df):
     fig=go.Figure()
     fig.add_trace(go.Scatter(x=df.t,y=df.thr,mode='lines',name='Throughput (Mbps)'))
     fig.add_trace(go.Scatter(x=df.t,y=df.bat,mode='lines',name='Battery (Wh)'))
     fig.add_trace(go.Scatter(x=df.t,y=df.SoC,mode='lines',name='SoC (frac)'))
     if "avg_eaves_risk_0to1" in df.columns:
-        fig.add_trace(go.Scatter(x=df.t, y=df["avg_eaves_risk_0to1"], mode='lines', name='Eaves Risk (0..1)', yaxis='y2'))
-        fig.update_layout(yaxis2=dict(overlaying='y', side='right', title='Risk (0..1)', range=[0,1]))
+        fig.add_trace(go.Scatter(x=df.t, y=df["avg_eaves_risk_0to1"], mode='lines',
+                                 name='Eaves Risk (0..1)', yaxis='y2'))
+        fig.update_layout(yaxis2=dict(overlaying='y', side='right',
+                                      title='Risk (0..1)', range=[0,1]))
     fig.update_xaxes(title="Time step"); fig.update_yaxes(title="Metrics")
     return greenify(fig,"Mission Metrics")
 
@@ -224,8 +241,10 @@ def animation_figure(traj_df, area, U):
                          marker=dict(size=8,color=[cmap[role[int(uid)]] for uid in base.uid]))],
         layout=go.Layout(xaxis=dict(range=[0,area[0]]),yaxis=dict(range=[0,area[1]]),
                          updatemenus=[dict(type="buttons",buttons=[
-                             dict(label="Play",method="animate",args=[None,{"frame":{"duration":50,"redraw":True},"fromcurrent":True}]),
-                             dict(label="Pause",method="animate",args=[[None],{"mode":"immediate","frame":{"duration":0,"redraw":False}}])
+                             dict(label="Play",method="animate",
+                                  args=[None,{"frame":{"duration":50,"redraw":True},"fromcurrent":True}]),
+                             dict(label="Pause",method="animate",
+                                  args=[[None],{"mode":"immediate","frame":{"duration":0,"redraw":False}}])
                          ])]))
     frames=[]
     for t in tvals:
@@ -251,7 +270,9 @@ def orbit_figure(U, area):
     py=[(uu.y/area[1]-0.5)*0.7*Rp*2 for uu in U]
     fig.add_trace(go.Scatter3d(
         x=px,y=py,z=[0]*len(U),mode="markers+text",
-        marker=dict(size=4,color=[THEME["neon"] if u.role=="source" else THEME["neon_mid"] if u.role=="relay" else THEME["neon_deep"] for u in U]),
+        marker=dict(size=4,color=[THEME["neon"] if u.role=="source"
+                                  else THEME["neon_mid"] if u.role=="relay"
+                                  else THEME["neon_deep"] for u in U]),
         text=[f"U{uu.uid}" for uu in U],textfont=dict(color=THEME["txt"]),textposition="top center"))
     fig.update_scenes(xaxis_visible=False,yaxis_visible=False,zaxis_visible=False,bgcolor=THEME["bg"])
     fig.update_layout(paper_bgcolor=THEME["bg"],margin=dict(l=0,r=0,t=0,b=0))
@@ -260,9 +281,13 @@ def orbit_figure(U, area):
 # ================================================================
 #  STREAMLIT APP
 # ================================================================
-st.set_page_config("Aerospace UAV Networks v2.3", layout="wide")
+st.set_page_config("Autonomous UAV Networks.", layout="wide")
 inject_css()
-st.title("🛰️ Aerospace-Grade UAV Networks Simulator v2.3 (Digital-Green)")
+st.title("Autonomous UAV Networks.")
+
+# Session seed for deterministic runs (until reset)
+if "rng_seed" not in st.session_state:
+    st.session_state.rng_seed = random.randrange(1<<32)
 
 # Sidebar
 a=AeroConfig()
@@ -293,13 +318,28 @@ eaves_en=st.sidebar.checkbox("Enable eavesdropper", False)
 eaves_radius=st.sidebar.slider("Eavesdrop radius (m)", 50, 1000, 300, 10)
 show3d=st.sidebar.checkbox("Show 3-D Orbit View", True)
 show_anim=st.sidebar.checkbox("Show Flight-Path Animation", False)
-export=st.sidebar.checkbox("Enable CSV Export", True)
+
+# NEW: Control buttons
+col_btn1, col_btn2 = st.sidebar.columns(2)
+with col_btn1:
+    run_clicked = st.button("▶️ Run Simulation")
+with col_btn2:
+    reset_clicked = st.button("🔄 Reset Fleet & Reseed")
+
+# Handle reset: new seed + rerun
+if reset_clicked:
+    st.session_state.rng_seed = random.randrange(1<<32)
+    st.experimental_rerun()
+
+# Apply deterministic seed for fleet/jammer/eaves placement
+np.random.seed(st.session_state.rng_seed)
+random.seed(st.session_state.rng_seed)
 
 # PHY indicator
 phy_mode="📡 PHY: LTE-MCS" if use_mcs else "📡 PHY: Shannon Ideal"
 st.markdown(f"### {phy_mode}")
 
-# Channel & wind
+# Channel & wind (use seeded RNG)
 ch=dict(f=fGHz,B=B,NF=NF,model="2R",eps=eps,sig=sig,pol="perp",
         shadow=shadow,rician=rician,mac_scheme=mac_scheme)
 jammer=dict(p=np.array([np.random.rand()*area[0],np.random.rand()*area[1],0.0]), P=5.0) if jam_en else None
@@ -307,72 +347,131 @@ eaves=(np.array([np.random.rand()*area[0],np.random.rand()*area[1],0.0]) if eave
 wd_rad=math.radians(wind_dir+180)  # “from” semantics
 wind=np.array([wind_spd*math.cos(wd_rad), wind_spd*math.sin(wd_rad), 0.0])
 
-# Fleet init
+# Fleet init (seeded)
 roles=["source"]*src + ["sink"]*snk + ["relay"]*(num-src-snk)
 U=[UAV(i, np.random.rand()*area[0], np.random.rand()*area[1],
        50+np.random.rand()*20, np.random.rand()*2*PI, a.v_cruise,
        roles[i], a.battery_Wh, Battery(a.battery_Wh), a) for i in range(num)]
 
-# Simulation loop
-metrics=[]; traj=[]
-for t in range(steps):
-    G=build_graph(U,ch,txP,txG,rxG,jammer,use_mcs)
-    S=[u.uid for u in U if u.role=="source"]; T=[u.uid for u in U if u.role=="sink"]
-    thr,_=flow(G,S,T)
-    # TDMA slot scaling per step
-    slots_per_step=max(1,int(round(dt/max(slots,1e-9))))
-    thr *= 1.0/slots_per_step
+# ================================================================
+#  SIMULATION EXECUTION (gated by Run button) + Progress
+# ================================================================
+if run_clicked:
+    metrics=[]; traj=[]
+    prog = st.progress(0)
+    status = st.empty()
 
-    # --- Eavesdropper risk (0..1 mean fleet proximity) ---
-    avg_risk=0.0
-    if eaves is not None:
-        dists=[np.linalg.norm(u.p3d()-eaves) for u in U]
-        avg_risk=float(np.mean([float(np.clip(1.0 - d/max(eaves_radius,1e-6), 0.0, 1.0)) for d in dists]))
+    for t in range(steps):
+        G=build_graph(U,ch,txP,txG,rxG,jammer,use_mcs)
+        S=[u.uid for u in U if u.role=="source"]; T=[u.uid for u in U if u.role=="sink"]
+        thr,_=flow(G,S,T)
 
-    # Move & energy
-    for u in U:
-        cmd_hdg=(u.hdg+np.random.normal(0,0.05))%(2*PI)
-        cmd_V=a.v_cruise+np.random.uniform(-2,2)
-        cmd_gam=np.radians(np.random.uniform(-a.climb_angle_deg_max,a.climb_angle_deg_max))
-        update_state(u,dt,cmd_hdg,cmd_V,cmd_gam,wind,area)
-        Pm=power_required(u.V,u.h,cmd_gam,u.cfg); u.bat.draw(electrical_power(Pm,u.cfg),dt)
-        u.energy_Wh=u.bat.energy_Wh
-        traj.append({"t":t,"uid":u.uid,"x":u.x,"y":u.y,"h":u.h})
+        # TDMA slot scaling per step
+        slots_per_step=max(1,int(round(dt/max(slots,1e-9))))
+        thr *= 1.0/slots_per_step
 
-    metrics.append(dict(t=t, thr=thr/1e6,
-                        bat=np.mean([u.bat.energy_Wh for u in U]),
-                        SoC=np.mean([u.bat.soc for u in U]),
-                        avg_eaves_risk_0to1=avg_risk))
+        # --- Eavesdropper risk (0..1 mean fleet proximity) ---
+        avg_risk=0.0
+        if eaves is not None:
+            dists=[np.linalg.norm(u.p3d()-eaves) for u in U]
+            avg_risk=float(np.mean([float(np.clip(1.0 - d/max(eaves_radius,1e-6), 0.0, 1.0)) for d in dists]))
 
-df=pd.DataFrame(metrics); traj_df=pd.DataFrame(traj)
+        # Move & energy
+        for u in U:
+            cmd_hdg=(u.hdg+np.random.normal(0,0.05))%(2*PI)
+            cmd_V=a.v_cruise+np.random.uniform(-2,2)
+            cmd_gam=np.radians(np.random.uniform(-a.climb_angle_deg_max,a.climb_angle_deg_max))
+            update_state(u,dt,cmd_hdg,cmd_V,cmd_gam,wind,area)
+            Pm=power_required(u.V,u.h,cmd_gam,u.cfg); u.bat.draw(electrical_power(Pm,u.cfg),dt)
+            u.energy_Wh=u.bat.energy_Wh
+            traj.append({"t":t,"uid":u.uid,"x":u.x,"y":u.y,"h":u.h})
 
-# Plots
-fig_pos=go.Figure()
-fig_pos.add_trace(go.Scatter(
-    x=[u.x for u in U], y=[u.y for u in U], mode="markers+text",
-    marker=dict(size=12, color=[THEME["neon"] if u.role=="source"
-                                else THEME["neon_mid"] if u.role=="relay"
-                                else THEME["neon_deep"] for u in U]),
-    text=[f"{u.uid}:{u.role[0].upper()}" for u in U], textposition="top center"))
-st.plotly_chart(greenify(fig_pos,"Final UAV Positions"), use_container_width=True)
+        metrics.append(dict(t=t, thr=thr/1e6,
+                            bat=np.mean([u.bat.energy_Wh for u in U]),
+                            SoC=np.mean([u.bat.soc for u in U]),
+                            avg_eaves_risk_0to1=avg_risk))
 
-st.plotly_chart(metrics_figure(df), use_container_width=True)
-if show3d: st.plotly_chart(orbit_figure(U, area), use_container_width=True)
-if show_anim and not traj_df.empty: st.plotly_chart(animation_figure(traj_df, area, U), use_container_width=True)
+        # Progress UI
+        frac = (t+1)/steps
+        prog.progress(frac)
+        status.write(f"Simulating… step {t+1}/{steps}")
 
-# Exports
-if export:
-    st.subheader("Exports")
-    st.download_button("📥 Download Metrics CSV", df.to_csv(index=False).encode("utf-8"),
-                       file_name="uav_metrics_v2_3.csv", mime="text/csv")
+    # Clear status when done
+    status.empty()
+
+    df=pd.DataFrame(metrics)
+    traj_df=pd.DataFrame(traj)
     fleet_rows=[{"uid":u.uid,"role":u.role,"x":u.x,"y":u.y,"h":u.h,
                  "mass_kg":u.cfg.mass_kg,"S":u.cfg.S,"AR":u.cfg.AR,"CD0":u.cfg.CD0,"e":u.cfg.e,
                  "eta_prop":u.cfg.eta_prop,"motor_eff":u.cfg.motor_eff,"battery_Wh":u.cfg.battery_Wh,
                  "v_cruise":u.cfg.v_cruise,"v_max":u.cfg.v_max,"v_loiter":u.cfg.v_loiter} for u in U]
-    st.download_button("📥 Download Fleet CSV", pd.DataFrame(fleet_rows).to_csv(index=False).encode("utf-8"),
+    fleet_df=pd.DataFrame(fleet_rows)
+
+    # -------- Visualizations --------
+    fig_pos=go.Figure()
+    fig_pos.add_trace(go.Scatter(
+        x=[u.x for u in U], y=[u.y for u in U], mode="markers+text",
+        marker=dict(size=12, color=[THEME["neon"] if u.role=="source"
+                                    else THEME["neon_mid"] if u.role=="relay"
+                                    else THEME["neon_deep"] for u in U]),
+        text=[f"{u.uid}:{u.role[0].upper()}" for u in U], textposition="top center"))
+    st.plotly_chart(greenify(fig_pos,"Final UAV Positions"), use_container_width=True)
+
+    st.plotly_chart(metrics_figure(df), use_container_width=True)
+    if show3d: st.plotly_chart(orbit_figure(U, area), use_container_width=True)
+    if show_anim and not traj_df.empty: st.plotly_chart(animation_figure(traj_df, area, U), use_container_width=True)
+
+    # -------- Expanded Export Options --------
+    st.subheader("Exports")
+
+    # Basic CSVs
+    st.download_button("📥 Metrics CSV", df.to_csv(index=False).encode("utf-8"),
+                       file_name="uav_metrics_v2_3.csv", mime="text/csv")
+    st.download_button("📥 Fleet CSV", fleet_df.to_csv(index=False).encode("utf-8"),
                        file_name="uav_fleet_v2_3.csv", mime="text/csv")
-    st.download_button("📥 Download Trajectory CSV", traj_df.to_csv(index=False).encode("utf-8"),
+    st.download_button("📥 Trajectory CSV", traj_df.to_csv(index=False).encode("utf-8"),
                        file_name="uav_trajectory_v2_3.csv", mime="text/csv")
+
+    # Final positions CSV
+    final_positions = pd.DataFrame([{"uid":u.uid,"role":u.role,"x":u.x,"y":u.y,"h":u.h} for u in U])
+    st.download_button("📥 Final Positions CSV", final_positions.to_csv(index=False).encode("utf-8"),
+                       file_name="uav_final_positions_v2_3.csv", mime="text/csv")
+
+    # Settings JSON
+    settings = {
+        "area": {"x": float(area[0]), "y": float(area[1])},
+        "steps": int(steps), "dt_s": float(dt),
+        "rf": {"f_GHz": float(fGHz), "B_Hz": float(B), "NF_dB": float(NF),
+               "eps_r": float(eps), "sigma_S_per_m": float(sig),
+               "shadow_dB": float(shadow), "rician_K_dB": float(rician),
+               "mac_scheme": ch["mac_scheme"], "txP_W": float(txP),
+               "txG_dBi": float(txG), "rxG_dBi": float(rxG)},
+        "wind": {"speed_mps": float(wind_spd), "dir_from_deg": int(wind_dir)},
+        "fleet": {"num": int(num), "sources": int(src), "sinks": int(snk)},
+        "phy_mode": "LTE-MCS" if use_mcs else "Shannon",
+        "security": {"jammer_enabled": bool(jam_en), "eaves_enabled": bool(eaves_en),
+                     "eaves_radius_m": int(eaves_radius)},
+        "ui": {"show3d": bool(show3d), "show_anim": bool(show_anim)},
+        "seed": int(st.session_state.rng_seed)
+    }
+    settings_json = json.dumps(settings, indent=2).encode("utf-8")
+    st.download_button("📥 Settings JSON", settings_json,
+                       file_name="sim_settings_v2_3.json", mime="application/json")
+
+    # ZIP bundle (metrics, fleet, trajectory, final positions, settings)
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("uav_metrics_v2_3.csv", df.to_csv(index=False))
+        zf.writestr("uav_fleet_v2_3.csv", fleet_df.to_csv(index=False))
+        zf.writestr("uav_trajectory_v2_3.csv", traj_df.to_csv(index=False))
+        zf.writestr("uav_final_positions_v2_3.csv", final_positions.to_csv(index=False))
+        zf.writestr("sim_settings_v2_3.json", json.dumps(settings, indent=2))
+    zip_buf.seek(0)
+    st.download_button("🗜️ Download All (ZIP)", zip_buf.getvalue(),
+                       file_name=f"uav_sim_bundle_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.zip",
+                       mime="application/zip")
+else:
+    st.info("Click **▶️ Run Simulation** (left sidebar) to execute and unlock visualizations & exports.")
 
 # LTE MCS table reference
 with st.sidebar.expander("📘 PHY Reference (LTE MCS Table)"):
