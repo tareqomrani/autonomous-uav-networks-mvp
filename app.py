@@ -259,7 +259,9 @@ def animation_figure(traj_df, area, U):
 def orbit_figure(U, area):
     Rp=400
     u,v=np.mgrid[0:2*PI:40j,0:PI:20j]
-    x=Rp*np.cos(u)*np.sin(v); y=Rp*np.sin(u)*np.cos(v); z=Rp*np.cos(v)
+    x=Rp*np.cos(u)*np.sin(v)
+    y=Rp*np.sin(u)*np.sin(v)   # correct mesh: sin(v) here (not cos)
+    z=Rp*np.cos(v)
     fig=go.Figure(); fig.add_surface(x=x,y=y,z=z,opacity=0.12,showscale=False,
                                      colorscale=[[0,"rgb(5,40,25)"],[1,"rgb(10,70,45)"]])
     for r,name in [(520,"LEO"),(700,"MEO"),(880,"GEO")]:
@@ -284,6 +286,14 @@ def orbit_figure(U, area):
 st.set_page_config("Autonomous UAV Networks", layout="wide")
 inject_css()
 st.title("Autonomous UAV Networks")
+
+# ---- compatibility shim for rerun ----
+def safe_rerun():
+    try:
+        st.rerun()
+    except AttributeError:
+        # Fallback for older Streamlit versions
+        st.experimental_rerun()
 
 # Session seed for deterministic runs (until reset)
 if "rng_seed" not in st.session_state:
@@ -329,7 +339,7 @@ with col_btn2:
 # Handle reset: new seed + rerun
 if reset_clicked:
     st.session_state.rng_seed = random.randrange(1<<32)
-    st.experimental_rerun()
+    safe_rerun()
 
 # Apply deterministic seed for fleet/jammer/eaves placement
 np.random.seed(st.session_state.rng_seed)
@@ -392,11 +402,9 @@ if run_clicked:
                             avg_eaves_risk_0to1=avg_risk))
 
         # Progress UI
-        frac = (t+1)/steps
-        prog.progress(frac)
+        prog.progress((t+1)/steps)
         status.write(f"Simulating… step {t+1}/{steps}")
 
-    # Clear status when done
     status.empty()
 
     df=pd.DataFrame(metrics)
