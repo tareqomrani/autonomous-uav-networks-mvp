@@ -1,7 +1,7 @@
 <p align="center">
   <img src="banner3.PNG" alt="Autonomous UAV Networks — Live Now">
 </p>
-# 🚀 Autonomous UAV Networks – Digital-Green v2.3  
+🚀 Autonomous UAV Networks – Digital-Green v2.3  
 **Aerospace-Accurate Multi-UAV Communication & Networking Simulator**
 
 ---
