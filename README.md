@@ -1,72 +1,75 @@
-<p align="center">
-  <img src="banner3.PNG" alt="Autonomous UAV Networks Banner" width="100%">
-</p>
-
-
-# 🛰️ Autonomous UAV Networks Simulator (Aerospace-Accurate Edition)
-
-> **High-Fidelity Simulation of Autonomous UAV Mesh Networks**  
-> Built for aerospace-grade research, education, and AI-driven network resilience modeling.  
-> Inspired by *Sarkar & Gul (2023), “Artificial Intelligence-Based Autonomous UAV Networks: A Survey.”*
+# 🚀 Autonomous UAV Networks – Digital-Green v2.3  
+**Aerospace-Accurate Multi-UAV Communication & Networking Simulator**
 
 ---
 
-## 🌐 Overview
+## 🧭 Overview  
+This simulator models multi-UAV networks with integrated aerodynamic, atmospheric, and RF models.  
+It is inspired by and aligns with themes from the survey article _“Artificial Intelligence-Based Autonomous UAV Networks: A Survey”_ by Sarkar & Gul (2023) 📖  [oai_citation:0‡MDPI](https://www.mdpi.com/2504-446X/7/5/322)  
+The goal is to operationalize key concepts in autonomous UAV communications, energy modeling, and network security.
 
-This Streamlit-based simulator models **autonomous UAV mesh networks** with full **RF propagation**, **energy**, and **threat environment** realism.  
-It combines aerospace physics, dynamic networking, and visual analytics into one interactive, browser-based lab.
+The app fuses real-world atmospheric physics (ISA), aerodynamic power models, Two-Ray + Rician propagation, and LTE MCS/MAC layers to explore secure, efficient mission-level UAV networking scenarios.
 
-### ✳️ Key Features
+---
 
-- 📡 **Physics-Accurate Channel Modeling** — Free-space pathloss (FSPL), MHz–km scaling, and Gaussian shadowing  
-- ⚙️ **Dynamic Graph Construction** — Source, relay, and sink topology updates per timestep  
-- 🔋 **Propulsion Energy Model** — Speed-dependent drag power (∝ v³) and per-UAV battery tracking  
-- 🚨 **Threat Simulation** — Configurable *jammer* and *eavesdropper* entities  
-- 🧠 **Adaptive MAC Schemes** — TDMA (orthogonal), NOMA (non-orthogonal), and RSMA (rate-splitting)  
-- 🌍 **3D Orbit View** — Realistic LEO/MEO/GEO visual context with fully interactive Plotly visualization  
-- 🎛️ **Neon or B&W Themes** — Choose between futuristic “digital-green” or minimalist monochrome
+## ⚙️ Features at a Glance  
 
-📊 Simulation Outputs
-	•	🗺️ Final UAV Positions — 2D neon plot showing node roles (S = Source, R = Relay, K = Sink)
-	•	🔗 Network Graph — Dynamic link edges proportional to throughput capacity
-	•	🛰️ Orbit Visualization — LEO/MEO/GEO orbit rings contextualizing aerial topology
-	•	📈 Metrics Table — Live throughput (Mbps), eavesdrop risk (0–1), and remaining battery (Wh)
+| Module | Description |
+|-------|-------------|
+| **ISA Atmosphere** | Computes density and temperature vs. altitude using the International Standard Atmosphere. |
+| **Aerodynamic Power Model** | Splits propulsion demand into induced, parasite, and climb components. |
+| **Battery & Efficiency** | Models power draw, conversion losses (propeller, motor), and SoC tracking. |
+| **RF Propagation (2-Ray + Rician)** | Models direct + ground-reflected paths with fading and shadowing. |
+| **LTE MCS / Shannon PHY** | Supports either Shannon ideal model or empirical LTE MCS interpolation. |
+| **MAC Presets (TDMA / NOMA / RSMA)** | Applies throughput scaling for orthogonal, non-orthogonal, and rate-splitting strategies. |
+| **Kinematics & Dynamics** | Updates UAV position, heading, altitude with turn rate, climb limits, and wind. |
+| **Security Modules** | Includes jammer, eavesdropper risk quantification, and link interference modeling. |
+| **3D Orbit Visualization** | Displays LEO/MEO/GEO reference rings and UAV constellation in 3D. |
+| **Flight Animation** | Time-series animation of UAV motion in 2D. |
+| **Metrics & Charts** | Throughput, battery, SoC, and eavesdrop risk plotted over time. |
+| **Export Suite** | CSV / JSON / ZIP export of metrics, trajectories, fleet, and simulation settings. |
 
-⸻
+---
 
-🧮 Aerospace Accuracy Highlights
-	•	FSPL channel loss formula: 32.44 + 20 log₁₀(f_MHz) + 20 log₁₀(d_km)
-	•	Boltzmann constant for thermal noise: k = 1.380 × 10⁻²³ J/K
-	•	Dynamic propulsion: P_total = P_base + C · v³
-	•	MAC fairness: TDMA → 1/N, RSMA → 0.8, NOMA → 1.0
+## 🧮 Core Models & Workflow
 
-⸻
+1. **Initialization**  
+   Randomly generate UAVs (sources, relays, sinks) and (optionally) adversaries (jammer, eavesdropper).  
 
-📘 Reference
+2. **Atmospheric Computations**  
+   Evaluate ISA temperature \(T(h)\), pressure \(p(h)\), and density \(\rho(h)\).  
 
-Sarkar, A., & Gul, M. (2023).
-Artificial Intelligence-Based Autonomous UAV Networks: A Survey.
-Drones, 7 (5), 322. https://doi.org/10.3390/drones7050322
+3. **Aerodynamic Power**  
+   Decompose power requirement:  
+   \[
+     P_{\text{total}} = P_{\text{induced}} + P_{\text{parasite}} + P_{\text{climb}}
+   \]
+   with standard formulas for each term.
 
-⸻
+4. **Electrical Power Conversion**  
+   \[
+     P_{\text{elec}} = \frac{P_{\text{total}}}{\eta_{\text{prop}}\,\eta_{\text{motor}}}
+   \]
 
-🧩 Ideal Use Cases
-	•	🔬 Researching swarm autonomy and AI routing
-	•	🎯 Evaluating jamming resilience and intercept risk
-	•	📡 Testing RF link stability under environmental stress
-	•	🧠 Exploring hybrid MAC strategies in contested airspace
+5. **State Update (Kinematics)**  
+   Constrain heading changes, apply wind, climb angle, and update (x, y, h).
+
+6. **Link Budget & Graph Construction**  
+   For each transmitter–receiver pair, compute path gain (Two-Ray, FSPL) + Rician fading, then SINR → capacity.  
+   Build directed capacity graph \(G(V, E)\).
+
+7. **MAC Scaling & Flow Computation**  
+   Scale link capacities by MAC share factor and run a “widest path” heuristic (resembling Ford–Fulkerson) to compute aggregate throughput.
+
+8. **Logging, Visualization & Export**  
+   Log per-step metrics, update plots/animations, and provide downloadable outputs.
 
 ---
 
 ## 🧭 Quick Start
 
 ```bash
-# Clone this repository
-git clone https://github.com/<your-username>/Autonomous-UAV-Networks-Simulator.git
-cd Autonomous-UAV-Networks-Simulator
-
-# Install dependencies
+git clone https://github.com/yourusername/autonomous-uav-networks.git
+cd autonomous-uav-networks
 pip install -r requirements.txt
-
-# Run the simulator
 streamlit run app.py
